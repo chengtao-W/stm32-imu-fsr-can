@@ -1,0 +1,40 @@
+# Keil build output
+MDK-ARM/CtrBoard/
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.lst
+MDK-ARM/*.map
+MDK-ARM/*.axf
+MDK-ARM/*.hex
+MDK-ARM/*.bin
+MDK-ARM/*.log
+MDK-ARM/JLinkLog.txt
+MDK-ARM/JLinkSettings.ini
+
+# STM32CubeIDE / generic build output
+Debug/
+Release/
+build/
+*.o
+*.d
+*.su
+*.elf
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+__pycache__/
+
+# Local backups and temporary files
+*.bak
+*.bak?
+*.fix
+*.tmp
+*.zip
+*.7z
+*.rar
+code_backups/
+*_stage/

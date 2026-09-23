@@ -1,0 +1,103 @@
+# STM32 IMU 与足底压力 CAN 网关
+
+该工程运行在 STM32H723 控制板上，采集 IMU 和墨现足底压力传感器数据，并通过 CAN1 周期发送给 Jetson 或其他上位机。
+
+当前版本是纯传感器网关，不包含电机初始化、电机控制、电机反馈、AO 控制或力矩指令。
+
+## 功能
+
+- 通过 CAN2 接收最多两路 IMU 数据。
+- 解析加速度、角速度、欧拉角和四元数。
+- 通过 USB Host CDC 接收墨现 20 点足底压力数据。
+- 支持左右鞋垫、总压力和步态相位计算。
+- 将完整传感器快照封装为带 CRC16 的应用层消息。
+- 通过 CAN1 以 10 Hz 向上位机发送数据。
+- USART1 提供 `STATUS`、`FSR` 和 `HELP` 调试命令。
+
+## 系统结构
+
+```text
+IMU 1/2 -- CAN2 500 kbit/s --+
+                              |
+墨现鞋垫 -- USB Host CDC -----+--> STM32H723 --> CAN1 1 Mbit/s --> Jetson/PC
+                                      |
+                                      +--> USART1 调试输出
+```
+
+## 数据流
+
+1. `IMU_Poll_RX()`轮询 CAN2 接收 FIFO 并更新两路 IMU 状态。
+2. USB Host CDC 回调将数据送入足底压力帧解析器。
+3. `FSR_DetectGaitPhase()`根据左右足底压力更新接触状态和步态相位。
+4. TIM4 产生 10 Hz 发送标志。
+5. `ExoTelemetry_Push()`生成 196 字节传感器快照。
+6. 通信层增加 `EB 90` 帧头和 CRC16，并拆分为 26 个经典 CAN 帧发送。
+
+## CAN 接口
+
+| 用途 | 外设 | 波特率 | CAN ID |
+| --- | --- | ---: | ---: |
+| IMU 输入 | FDCAN2 | 500 kbit/s | 由 IMU 协议定义 |
+| 上位机输出 | FDCAN1 | 1 Mbit/s | `0x621` |
+| 上位机输入 | FDCAN1 | 1 Mbit/s | `0x620`，当前不注册控制处理器 |
+
+传感器消息 ID 为 `0x05`。载荷包含：
+
+- 两路 IMU 的三轴加速度、三轴角速度、欧拉角和四元数；
+- 左右足底的有效点数、总压力、步态相位；
+- 左右足底各 20 个原始压力值。
+
+完整字节布局、CRC 和重组方法见 [CAN 协议文档](docs/CAN_PROTOCOL.md)。
+
+## 目录
+
+```text
+Core/          应用逻辑、传感器解析和通信封装
+Drivers/       STM32H7 HAL 与 CMSIS
+Middlewares/   STM32 USB Host CDC 中间件
+USB_HOST/      USB Host 应用与底层配置
+User/          CAN BSP、IMU 协议解析和延时模块
+MDK-ARM/       Keil 工程与启动文件
+docs/          通信协议文档
+CtrBoard.ioc   STM32CubeMX 工程
+```
+
+## 关键文件
+
+- `Core/Src/main.c`：初始化和主循环。
+- `Core/Src/imu.c`：IMU CAN 数据接收与解析。
+- `Core/Src/fsr.c`：墨现鞋垫 USB CDC 帧解析和步态相位。
+- `Core/Src/exo_telemetry.c`：传感器快照组装。
+- `Core/Src/robot_comm.c`：应用层帧、CRC16 和 CAN 分片发送。
+- `User/bsp_fdcan.c`：FDCAN 配置与收发接口。
+
+## 编译
+
+### Keil MDK
+
+1. 安装 Keil MDK-ARM 和 STM32H7 Device Family Pack。
+2. 打开 `MDK-ARM/CtrBoard.uvprojx`。
+3. 选择目标 `CtrBoard`。
+4. 执行 Build。
+
+已验证工具链：ARM Compiler 5.06 update 1。当前仓库中的最小工程编译结果为 `0 errors, 0 warnings`。
+
+## Jetson 接收
+
+配置 SocketCAN：
+
+```bash
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 up
+candump can0,621:7FF
+```
+
+Jetson 端不能把每个 CAN 帧当作独立样本。接收程序需要按顺序拼接 ID `0x621` 的数据，搜索 `EB 90`，读取长度字段，收齐载荷和 CRC 后再发布 ROS 消息。
+
+## 当前限制
+
+- 经典 CAN 单帧最多 8 字节，一个传感器样本需要 26 帧。
+- 协议当前没有逐 CAN 帧序号；发生丢帧时，应丢弃本条消息并搜索下一组 `EB 90` 帧头。
+- 未连接的第二路 IMU 或第二只鞋垫字段保持为零。
+- 仓库不包含电机控制功能，也不接受电机控制命令。
