@@ -13,7 +13,7 @@
 
 void ExoTelemetry_Init(void)
 {
-    /* Sensor-only transport: no motor/control command handlers are registered. */
+    /* Sensor-only transport: no command handlers are registered. */
 }
 
 void ExoTelemetry_Push(void)

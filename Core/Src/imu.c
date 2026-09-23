@@ -7,15 +7,11 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "imu.h"
-#include "robot_comm.h"
-#include "usart.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include "bsp_fdcan.h"
 #include "canopen_parser.h"
-#include "fsr.h"
-#include "debug_if.h"
 
 /* Private typedef -----------------------------------------------------------*/
 
@@ -70,8 +66,6 @@ static hipnuc_can_frame_t make_common_frame(uint32_t rec_id, uint32_t id_type, c
     frame.hw_ts_us = 0;
     return frame;
 }
-
-
 void update_imu_data_from_frame(IMU_Data_t *imu, const can_sensor_data_t *sensor, int msg_type)
 {
     if (sensor == NULL || imu == NULL) return;
@@ -121,7 +115,6 @@ void update_imu_data_from_frame(IMU_Data_t *imu, const can_sensor_data_t *sensor
         imu->mag[2] = sensor->mag_z;
     }
 }
-
 /**
  * @brief  杞 FDCAN2 RX FIFO锛岃В鏋愬苟鏇存柊 IMU 鏁版嵁
  * @note   鍦ㄤ富寰幆涓皟鐢紝鏇夸唬涓柇鏂瑰紡銆? *         鐩存帴璇诲瘎瀛樺櫒鍒ゆ柇 FIFO 鏄惁鏈夋暟鎹紝缁曡繃 HAL 鐘舵€佹鏌ャ€? */
@@ -365,128 +358,4 @@ void fdcan2_rx_callback(void)
         }
     }
 }
-
-/**
- * @brief  閫氳繃 USB CDC 鍙戦€?IMU 鏁版嵁缁欎笂浣嶆満 (鍙岃 JSON)
- * @note   姣?10ms 璋冪敤涓€娆?(100Hz)
- *         Line 1: {"t":"IMU","acc":[...],"gyr":[...],"eul":[...],"quat":[...],"fps":N}
- *         Line 2: {"t":"CTRL","L":{...},"R":{...}}
- */
-#if 0  /* Retired with the UART JSON telemetry path. */
-#define IMU_UART_TIMEOUT_BASE_MS  20U
-#define IMU_UART_TIMEOUT_PER_BYTE 1U
-
-static void imu_uart_send_line(const char *buf, int len)
-{
-    if (len <= 0 || len >= 512) {
-        return;
-    }
-
-    uint32_t timeout = IMU_UART_TIMEOUT_BASE_MS + ((uint32_t)len * IMU_UART_TIMEOUT_PER_BYTE);
-    (void)HAL_UART_Transmit(&huart1, (uint8_t *)buf, (uint16_t)len, timeout);
-}
-#endif
-void IMU_Send_Data_To_USB(void)
-{
-#if 0
-    char buf[512];
-    int len;
-#endif
-
-    IMU_Data_t snap1, snap2;
-    __disable_irq();
-    snap1 = imu_data;
-    snap2 = imu_data2;
-    __enable_irq();
-    /* The old JSON-over-UART stream is now binary telemetry over CAN. */
-    comm_send(MSG_TELEM_IMU1, &snap1, (uint8_t)sizeof(snap1));
-    comm_send(MSG_TELEM_IMU2, &snap2, (uint8_t)sizeof(snap2));
-    return;
-
-#if 0  /* Retired UART/motor JSON output; sensor transport is binary CAN only. */
-
-    /*
-     * Line 1: IMU #1 (CAN ID 9) 鈥?sensor data only
-     */
-    len = snprintf(buf, sizeof(buf),
-        "{\"t\":\"I1\","
-        "\"a\":[%.3f,%.3f,%.3f],"
-        "\"g\":[%.3f,%.3f,%.3f],"
-        "\"e\":[%.3f,%.3f,%.3f],"
-        "\"q\":[%.3f,%.3f,%.3f,%.3f]"
-        "}\r\n",
-        snap1.acc[0], snap1.acc[1], snap1.acc[2],
-        snap1.gyro[0], snap1.gyro[1], snap1.gyro[2],
-        snap1.angle[0], snap1.angle[1], snap1.angle[2],
-        snap1.quat[0], snap1.quat[1], snap1.quat[2], snap1.quat[3]
-    );
-    if (len > 0 && len < (int)sizeof(buf))
-        imu_uart_send_line(buf, len);
-
-    /* Line 2: IMU #2 (CAN ID 8) */
-    len = snprintf(buf, sizeof(buf),
-        "{\"t\":\"I2\","
-        "\"a\":[%.3f,%.3f,%.3f],"
-        "\"g\":[%.3f,%.3f,%.3f],"
-        "\"e\":[%.3f,%.3f,%.3f],"
-        "\"q\":[%.3f,%.3f,%.3f,%.3f]"
-        "}\r\n",
-        snap2.acc[0], snap2.acc[1], snap2.acc[2],
-        snap2.gyro[0], snap2.gyro[1], snap2.gyro[2],
-        snap2.angle[0], snap2.angle[1], snap2.angle[2],
-        snap2.quat[0], snap2.quat[1], snap2.quat[2], snap2.quat[3]
-    );
-    if (len > 0 && len < (int)sizeof(buf))
-        imu_uart_send_line(buf, len);
-
-    /*
-     * Line 3: EXO 鈥?full exoskeleton control telemetry
-     *   L/R: pos_ref, pos_fb, torque
-     *   AO:  frequency (Hz), phase (rad)
-     *   FSR: phase, heel/toe pressure
-     *   DBG: ctrl_enabled flags
-     */
-    {
-        uint16_t L_heel = 0, L_toe = 0, R_heel = 0, R_toe = 0;
-        for (int i = FSR_IDX_HEEL_START; i <= FSR_IDX_HEEL_END; i++) {
-            L_heel += fsr_data.left.raw[i];
-            R_heel += fsr_data.right.raw[i];
-        }
-        for (int i = FSR_IDX_TOE_START; i <= FSR_IDX_TOE_END; i++) {
-            L_toe += fsr_data.left.raw[i];
-            R_toe += fsr_data.right.raw[i];
-        }
-
-        len = snprintf(buf, sizeof(buf),
-            "{\"t\":\"EXO\","
-            "\"L\":{\"ref\":%.3f,\"fb\":%.3f,\"tor\":%.2f},"
-            "\"R\":{\"ref\":%.3f,\"fb\":%.3f,\"tor\":%.2f},"
-            "\"ao\":{\"Lf\":%.2f,\"Lp\":%.2f,\"Rf\":%.2f,\"Rp\":%.2f},"
-            "\"fsr\":{\"L\":{\"ph\":%d,\"h\":%u,\"t\":%u},"
-                     "\"R\":{\"ph\":%d,\"h\":%u,\"t\":%u}},"
-            "\"dbg\":{\"en\":%d,\"m1\":%d,\"m2\":%d},"
-            "\"post\":{\"st\":%d,\"evt\":%d,\"tilt\":%.1f,\"rate\":%.1f},"
-            "\"safe\":{\"ok\":%u,\"flags\":%lu},\"ct\":%lu"
-            "}\r\n",
-            exo_dbg.L_pos_ref, exo_dbg.L_pos_fb, exo_dbg.L_tor,
-            exo_dbg.R_pos_ref, exo_dbg.R_pos_fb, exo_dbg.R_tor,
-            exo_dbg.ao_L_freq, exo_dbg.ao_L_phase,
-            exo_dbg.ao_R_freq, exo_dbg.ao_R_phase,
-            (int)fsr_data.left.phase,  L_heel, L_toe,
-            (int)fsr_data.right.phase, R_heel, R_toe,
-            (int)dbg_cfg.ctrl_enabled,
-            (int)dbg_cfg.motor1_enabled,
-            (int)dbg_cfg.motor2_enabled,
-            (int)posture_state,
-            (int)posture_event,
-            posture_knee_tilt_deg,
-            posture_knee_rate_dps,
-            (unsigned int)exo_output_allowed,
-            (unsigned long)exo_safety_flags,
-            can_rx_total
-        );
-    }
-    if (len > 0 && len < (int)sizeof(buf))
-        imu_uart_send_line(buf, len);
-#endif
-}
+/* End of file. */

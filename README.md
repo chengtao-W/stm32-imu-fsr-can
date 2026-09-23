@@ -1,8 +1,8 @@
-# STM32 IMU 与足底压力 CAN 网关
+# STM32 IMU 与足底压力 CAN 系统
 
-该工程运行在 STM32H723 控制板上，采集 IMU 和墨现足底压力传感器数据，并通过 CAN1 周期发送给 Jetson 或其他上位机。
+该项目包含 STM32H723 下位机和 Python 图形上位机。下位机采集 IMU 与墨现足底压力传感器数据，通过 CAN1 周期发送；上位机完成 CAN 分片重组、CRC 校验、实时曲线、压力热力图和 CSV 记录。
 
-当前版本是纯传感器网关，不包含电机初始化、电机控制、电机反馈、AO 控制或力矩指令。
+当前版本只处理传感器数据，不包含电机初始化、电机控制、电机反馈、AO 控制或力矩指令。
 
 ## 功能
 
@@ -12,6 +12,9 @@
 - 支持左右鞋垫、总压力和步态相位计算。
 - 将完整传感器快照封装为带 CRC16 的应用层消息。
 - 通过 CAN1 以 10 Hz 向上位机发送数据。
+- 上位机显示两路 IMU 曲线和左右足底 20 点压力热力图。
+- 支持 Windows CAN 适配器和 Jetson SocketCAN。
+- 支持 CSV 记录、悬停读数和无硬件演示模式。
 - USART1 提供 `STATUS`、`FSR` 和 `HELP` 调试命令。
 
 ## 系统结构
@@ -19,9 +22,9 @@
 ```text
 IMU 1/2 -- CAN2 500 kbit/s --+
                               |
-墨现鞋垫 -- USB Host CDC -----+--> STM32H723 --> CAN1 1 Mbit/s --> Jetson/PC
-                                      |
-                                      +--> USART1 调试输出
+墨现鞋垫 -- USB Host CDC -----+--> STM32H723 --> CAN1 1 Mbit/s --> Python上位机
+                                      |                              |
+                                      +--> USART1 调试输出            +--> 曲线/热力图/CSV
 ```
 
 ## 数据流
@@ -59,6 +62,7 @@ USB_HOST/      USB Host 应用与底层配置
 User/          CAN BSP、IMU 协议解析和延时模块
 MDK-ARM/       Keil 工程与启动文件
 docs/          通信协议文档
+host/          Python CAN 图形上位机
 CtrBoard.ioc   STM32CubeMX 工程
 ```
 
@@ -70,6 +74,8 @@ CtrBoard.ioc   STM32CubeMX 工程
 - `Core/Src/exo_telemetry.c`：传感器快照组装。
 - `Core/Src/robot_comm.c`：应用层帧、CRC16 和 CAN 分片发送。
 - `User/bsp_fdcan.c`：FDCAN 配置与收发接口。
+- `host/protocol.py`：CAN 字节流重组、CRC16 和传感器载荷解码。
+- `host/sensor_monitor.py`：IMU 曲线、足底热力图和 CSV 图形界面。
 
 ## 编译
 
@@ -81,6 +87,29 @@ CtrBoard.ioc   STM32CubeMX 工程
 4. 执行 Build。
 
 已验证工具链：ARM Compiler 5.06 update 1。当前仓库中的最小工程编译结果为 `0 errors, 0 warnings`。
+
+## 上位机
+
+安装依赖：
+
+```bash
+cd host
+python -m pip install -r requirements.txt
+```
+
+连接 CAN 硬件后运行：
+
+```bash
+python sensor_monitor.py
+```
+
+不连接硬件检查界面：
+
+```bash
+python sensor_monitor.py --demo
+```
+
+Windows PCAN 默认使用 `pcan / PCAN_USBBUS1`；Jetson 默认使用 `socketcan / can0`。详细说明见 [上位机文档](host/README.md)。
 
 ## Jetson 接收
 

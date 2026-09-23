@@ -9,7 +9,6 @@
 
 #define COMM_HANDLER_COUNT  256U
 CommRingBuffer_t tx_ring_buffer = {0};
-Payload_t target_cmd;
 
 static uint8_t rx_byte;
 static CommCmdHandler handlers[COMM_HANDLER_COUNT];
@@ -157,7 +156,6 @@ void comm_init(void)
     can_rx_count = 0U;
     __enable_irq();
 
-    memset(&target_cmd, 0, sizeof(target_cmd));
     memset(handlers, 0, sizeof(handlers));
     ascii_sink = DebugIf_FeedByte;
     comm_reset_rx();

@@ -29,7 +29,7 @@ void bsp_can_it_enable(void)
 {
     /*
      * CAN interrupts are NOT used.  IMU frames are polled in the
-     * main loop via IMU_Poll_RX(); motor communication is TX-only.
+     * main loop via IMU_Poll_RX(); sensor telemetry is transmitted on CAN1.
      * Enabling FDCAN RX interrupts caused HardFault crashes due to
      * ISR/timing races when the IMU was already streaming.
      *

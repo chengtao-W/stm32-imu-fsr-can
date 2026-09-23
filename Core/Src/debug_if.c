@@ -5,7 +5,7 @@
  *
  * 从通信�?(robot_comm.c) 拆出。通过 comm_register_ascii_sink() 接入 UART1 RX,
  * 接收非二进制帧的 ASCII 字节, 解析命令行并整定 dbg_cfg / 执行动作�? *
- * 传感器网关命令: HELP, STATUS, FSR LEFT|RIGHT|DUAL|STATUS
+ * 传感器命令: HELP, STATUS, FSR LEFT|RIGHT|DUAL|STATUS
  ******************************************************************************
  */
 
@@ -14,8 +14,6 @@
 #include "fsr.h"
 #include <stdio.h>
 #include <string.h>
-
-#define SAFE_DEFAULT_TORQUE_NM  0.3f
 
 /* ======================================================================== */
 /*  全局调试配置                                                             */
@@ -50,30 +48,14 @@ static void DebugIf_ProcessLine(const char *line);
 
 void DebugIf_Init(void)
 {
-    dbg_cfg.kp_hip            = 0.1f;
-    dbg_cfg.kd_hip            = 0.0f;
-    dbg_cfg.ki_hip            = 0.05f;
-    dbg_cfg.max_torque        = SAFE_DEFAULT_TORQUE_NM;
-    dbg_cfg.ao_omega_init     = 1.0f;
-    dbg_cfg.ao_epsilon        = 0.75f;   /* 耦合增益 (配合输入归一�? �?0.3 会致频率学不�? */
-    dbg_cfg.ao_nu             = 0.20f;   /* 频率学习�?(配合 epsilon 加速收�? */
-    dbg_cfg.ao_omega_min      = 0.3f;
-    dbg_cfg.ao_omega_max      = 3.5f;
-    dbg_cfg.swing_amplitude   = 0.5f;
-    dbg_cfg.joint_offset      = 1.0f;
     dbg_cfg.fsr_contact_on    = 80;
     dbg_cfg.fsr_contact_off   = 30;
     dbg_cfg.fsr_heel_thresh   = 100;
-    dbg_cfg.blend_cycles      = 5;
-    dbg_cfg.ctrl_enabled      = false;
-    dbg_cfg.motor1_enabled    = false;
-    dbg_cfg.motor2_enabled    = false;
-    dbg_cfg.telemetry_enabled = false;
     dbg_line_idx = 0;
 
     printf("\r\n");
     printf("========================================\r\n");
-    printf("  CtrBoard Sensor CAN Gateway\r\n");
+    printf("  CtrBoard Sensor CAN System\r\n");
     printf("========================================\r\n");
     printf("  STATUS    -- sensor status\r\n");
     printf("  FSR LEFT|RIGHT|DUAL|STATUS\r\n");
