@@ -86,18 +86,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM4) {
-		// 灏嗗綋鍓嶇姸鎬侀€氳繃 USB 鎺ㄩ€佸埌涓绘満
-		// 銆愪复鏃剁Щ闄ゃ€慠obot_Push_Feedback();
-
-		// 姣?10 娆?TIM4 涓柇璁剧疆涓€娆?IMU 鏁版嵁鍙戦€佹爣蹇?(绾?100Hz)
-		// 瀹為檯鍙戦€佹斁鍦ㄤ富寰幆涓紝閬垮厤鍦?ISR 涓樆濉炶皟鐢?HAL_UART_Transmit
-		{
-			static uint8_t imu_tx_cnt = 0;
-			if (++imu_tx_cnt >= 10) {
-				imu_tx_cnt = 0;
-				imu_tx_flag = 1;
-			}
-		}
+		/* Schedule the 100 Hz CAN snapshot outside the timer ISR. */
+		imu_tx_flag = 1;
 	}
 }
 /* USER CODE END 0 */
@@ -196,9 +186,13 @@ int main(void)
     FSR_DetectGaitPhase();
 
     if (imu_tx_flag) {
+		static uint8_t posture_tick_count = 0U;
         imu_tx_flag = 0;
-        DetectPosture();
-        /* Publish IMU and foot-pressure telemetry over CAN1 at 10 Hz. */
+		if (++posture_tick_count >= 10U) {
+			posture_tick_count = 0U;
+			DetectPosture();
+		}
+		/* Publish sensor snapshots over CAN1 at 100 Hz. */
         ExoTelemetry_Push();
     }
     Robot_Flush_TxBuffer();

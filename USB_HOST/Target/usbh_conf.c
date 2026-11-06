@@ -22,7 +22,8 @@
 #include "usbh_core.h"
 
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include "stm32h7xx_ll_usb.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -176,8 +177,6 @@ void HAL_HCD_PortEnabled_Callback(HCD_HandleTypeDef *hhcd)
 {
   printf("[USB LL] port enabled\r\n");
   USBH_LL_PortEnabled(hhcd->pData);
-  /* Clear any stale disconnect flag: port is enabled, device is connected. */
-  ((USBH_HandleTypeDef *)hhcd->pData)->device.is_disconnected = 0U;
 }
 
 /**
@@ -314,14 +313,39 @@ USBH_SpeedTypeDef USBH_LL_GetSpeed(USBH_HandleTypeDef *phost)
   */
 USBH_StatusTypeDef USBH_LL_ResetPort(USBH_HandleTypeDef *phost)
 {
-  HAL_StatusTypeDef hal_status = HAL_OK;
-  USBH_StatusTypeDef usb_status = USBH_OK;
+  HCD_HandleTypeDef *hhcd = (HCD_HandleTypeDef *)phost->pData;
+  uint32_t USBx_BASE = (uint32_t)hhcd->Instance;
+  uint32_t hprt_before = USBx_HPRT0;
+  HAL_StatusTypeDef reset_status;
+  uint32_t hprt_after;
 
-  hal_status = HAL_HCD_ResetPort(phost->pData);
+  printf("[USB LL] reset begin HPRT0=0x%08lX\r\n",
+         (unsigned long)hprt_before);
+  reset_status = HAL_HCD_ResetPort(hhcd);
+  hprt_after = USBx_HPRT0;
+  if (reset_status == HAL_OK)
+  {
+    for (uint32_t wait_ms = 0U;
+         wait_ms < 100U && (hprt_after & USB_OTG_HPRT_PENA) == 0U;
+         wait_ms++)
+    {
+      HAL_Delay(1U);
+      hprt_after = USBx_HPRT0;
+    }
+  }
 
-  usb_status = USBH_Get_USB_Status(hal_status);
-
-  return usb_status;
+  printf("[USB LL] reset end HPRT0=0x%08lX status=%u\r\n",
+         (unsigned long)hprt_after, (unsigned int)reset_status);
+  /* A missed port-enable interrupt must not leave enumeration waiting forever. */
+  if (reset_status == HAL_OK &&
+      (hprt_after & (USB_OTG_HPRT_PCSTS | USB_OTG_HPRT_PENA)) ==
+          (USB_OTG_HPRT_PCSTS | USB_OTG_HPRT_PENA) &&
+      USBH_IsPortEnabled(phost) == 0U)
+  {
+    printf("[USB LL] port enabled (poll fallback)\r\n");
+    USBH_LL_PortEnabled(phost);
+  }
+  return USBH_Get_USB_Status(reset_status);
 }
 
 /**

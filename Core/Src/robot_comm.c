@@ -18,7 +18,6 @@ static uint8_t can_rx_buffer[COMM_CAN_RX_BUFFER_SIZE];
 static volatile uint16_t can_rx_head;
 static volatile uint16_t can_rx_tail;
 static volatile uint16_t can_rx_count;
-static uint32_t can_tx_last_tick;
 
 static uint8_t rx_state;
 static uint8_t rx_msg_id;
@@ -108,33 +107,28 @@ static void comm_can_tx_step(void)
     uint8_t len;
     uint8_t result;
     uint16_t index;
-    uint32_t now = HAL_GetTick();
-
-    if (now == can_tx_last_tick || tx_ring_buffer.count == 0U ||
-        HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) == 0U) {
-        return;
+    while (tx_ring_buffer.count != 0U &&
+           HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0U) {
+        __disable_irq();
+        len = (tx_ring_buffer.count > sizeof(frame)) ? (uint8_t)sizeof(frame)
+                                                      : (uint8_t)tx_ring_buffer.count;
+        index = tx_ring_buffer.tail;
+        for (uint8_t i = 0U; i < len; i++) {
+            frame[i] = tx_ring_buffer.buffer[index];
+            index = (uint16_t)((index + 1U) % COMM_TX_BUFFER_SIZE);
+        }
+        /* Preserve byte order and leave queued bytes intact on HAL failure. */
+        result = fdcanx_send_data_v2(&hfdcan1, COMM_CAN_MCU_TO_HOST_ID,
+                                     FDCAN_STANDARD_ID, frame, len);
+        if (result == 0U) {
+            tx_ring_buffer.tail = index;
+            tx_ring_buffer.count = (uint16_t)(tx_ring_buffer.count - len);
+        }
+        __enable_irq();
+        if (result != 0U) {
+            break;
+        }
     }
-    can_tx_last_tick = now;
-
-    __disable_irq();
-    len = (tx_ring_buffer.count > sizeof(frame)) ? (uint8_t)sizeof(frame)
-                                                  : (uint8_t)tx_ring_buffer.count;
-    index = tx_ring_buffer.tail;
-    for (uint8_t i = 0U; i < len; i++) {
-        frame[i] = tx_ring_buffer.buffer[index];
-        index = (uint16_t)((index + 1U) % COMM_TX_BUFFER_SIZE);
-    }
-    __enable_irq();
-
-    /* Keep the queue update and hardware FIFO write atomic. */
-    __disable_irq();
-    result = fdcanx_send_data_v2(&hfdcan1, COMM_CAN_MCU_TO_HOST_ID,
-                                 FDCAN_STANDARD_ID, frame, len);
-    if (result == 0U) {
-        tx_ring_buffer.tail = index;
-        tx_ring_buffer.count = (uint16_t)(tx_ring_buffer.count - len);
-    }
-    __enable_irq();
 }
 
 void comm_register_handler(uint8_t msg_id, CommCmdHandler handler)
@@ -159,7 +153,6 @@ void comm_init(void)
     memset(handlers, 0, sizeof(handlers));
     ascii_sink = DebugIf_FeedByte;
     comm_reset_rx();
-    can_tx_last_tick = HAL_GetTick() - 1U;
     comm_arm_rx();
 }
 

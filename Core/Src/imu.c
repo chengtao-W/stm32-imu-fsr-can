@@ -7,6 +7,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "imu.h"
+#include "imu_freshness.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -22,6 +23,30 @@
 /* Private variables ---------------------------------------------------------*/
 IMU_Data_t imu_data  = {0};   /* IMU #1: CAN ID 9 */
 IMU_Data_t imu_data2 = {0};   /* IMU #2: CAN ID 8 */
+
+static volatile uint32_t imu_last_rx_ms[2];
+static volatile uint8_t imu_seen[2];
+static uint32_t imu_last_quat_rx_ms[2];
+static uint8_t imu_quat_seen[2];
+static uint32_t shank_quat_request_ms;
+static uint8_t shank_quat_requests;
+
+#define IMU_QUAT_TIMEOUT_MS       500U
+#define IMU_QUAT_REQUEST_DELAY_MS 2000U
+#define IMU_QUAT_REQUEST_GAP_MS   1000U
+#define IMU_QUAT_REQUEST_MAX      3U
+
+bool IMU_IsFresh(uint8_t index, uint32_t now_ms)
+{
+    return index < 2U && imu_seen[index] != 0U &&
+           (uint32_t)(now_ms - imu_last_rx_ms[index]) <= 500U;
+}
+
+bool IMU_IsQuaternionFresh(uint8_t index, uint32_t now_ms)
+{
+    return IMU_IsFresh(index, now_ms) && imu_quat_seen[index] != 0U &&
+           (uint32_t)(now_ms - imu_last_quat_rx_ms[index]) <= IMU_QUAT_TIMEOUT_MS;
+}
 
 /* CAN 甯ц鏁板櫒 (璋冭瘯鐢? */
 volatile uint32_t can_rx_total   = 0;
@@ -174,11 +199,42 @@ void IMU_Poll_RX(void)
             else
                 node_id = (uint8_t)(rec_id & 0x7F);       /* CANopen Node-ID */
 
-            if (node_id == 9)
-                update_imu_data_from_frame(&imu_data, &sensor, msg_type);
-            else if (node_id == 8)
-                update_imu_data_from_frame(&imu_data2, &sensor, msg_type);
+            if (node_id == 9 || node_id == 8) {
+                const uint8_t index = (node_id == 9) ? 0U : 1U;
+                const uint32_t now_ms = HAL_GetTick();
+                if (!IMU_IsFresh(index, now_ms)) {
+                    imu_quat_seen[index] = 0U;
+                    imu_last_quat_rx_ms[index] = now_ms;
+                    if (index == 1U) {
+                        shank_quat_requests = 0U;
+                    }
+                }
+                update_imu_data_from_frame(index == 0U ? &imu_data : &imu_data2,
+                                           &sensor, msg_type);
+                if (msg_type == CAN_MSG_QUAT &&
+                    (sensor.quat_w != 0.0f || sensor.quat_x != 0.0f ||
+                     sensor.quat_y != 0.0f || sensor.quat_z != 0.0f)) {
+                    imu_last_quat_rx_ms[index] = now_ms;
+                    imu_quat_seen[index] = 1U;
+                    if (index == 1U) {
+                        shank_quat_requests = 0U;
+                    }
+                }
+                imu_last_rx_ms[index] = now_ms;
+                imu_seen[index] = 1U;
+            }
             /* other IDs ignored */
+        }
+    }
+
+    if (IMU_IsFresh(1U, HAL_GetTick()) &&
+        !IMU_IsQuaternionFresh(1U, HAL_GetTick()) &&
+        (uint32_t)(HAL_GetTick() - imu_last_quat_rx_ms[1]) >= IMU_QUAT_REQUEST_DELAY_MS &&
+        shank_quat_requests < IMU_QUAT_REQUEST_MAX &&
+        (uint32_t)(HAL_GetTick() - shank_quat_request_ms) >= IMU_QUAT_REQUEST_GAP_MS) {
+        shank_quat_request_ms = HAL_GetTick();
+        if (hipnuc_j1939_send_cfg(&hfdcan2, 8U, 0x55U, 0x0146U, 10U) == 0U) {
+            shank_quat_requests++;
         }
     }
 }

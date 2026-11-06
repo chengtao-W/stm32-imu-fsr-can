@@ -8,6 +8,7 @@
 #include "exo_telemetry.h"
 #include "robot_comm.h"
 #include "imu.h"
+#include "imu_freshness.h"
 #include "fsr.h"
 #include <string.h>
 
@@ -24,17 +25,21 @@ void ExoTelemetry_Push(void)
     memset(&t, 0, sizeof(t));
     t.timestamp_ms = HAL_GetTick();
 
-    for (i = 0U; i < 3U; i++) {
-        t.imu_1_acc[i]   = imu_data.acc[i];
-        t.imu_1_gyro[i]  = imu_data.gyro[i];
-        t.imu_1_euler[i] = imu_data.angle[i];
-        t.imu_2_acc[i]   = imu_data2.acc[i];
-        t.imu_2_gyro[i]  = imu_data2.gyro[i];
-        t.imu_2_euler[i] = imu_data2.angle[i];
-    }
-    for (i = 0U; i < 4U; i++) {
-        t.imu_1_quat[i] = imu_data.quat[i];
-        t.imu_2_quat[i] = imu_data2.quat[i];
+    for (i = 0U; i < 2U; i++) {
+        const IMU_Data_t *source = (i == 0U) ? &imu_data : &imu_data2;
+        float *acc = (i == 0U) ? t.imu_1_acc : t.imu_2_acc;
+        float *gyro = (i == 0U) ? t.imu_1_gyro : t.imu_2_gyro;
+        float *euler = (i == 0U) ? t.imu_1_euler : t.imu_2_euler;
+        float *quat = (i == 0U) ? t.imu_1_quat : t.imu_2_quat;
+        if (!IMU_IsFresh(i, t.timestamp_ms)) {
+            continue;
+        }
+        memcpy(acc, source->acc, sizeof(source->acc));
+        memcpy(gyro, source->gyro, sizeof(source->gyro));
+        memcpy(euler, source->angle, sizeof(source->angle));
+        if (IMU_IsQuaternionFresh(i, t.timestamp_ms)) {
+            memcpy(quat, source->quat, sizeof(source->quat));
+        }
     }
 
     t.fsr_L_phase  = (uint8_t)fsr_data.left.phase;
