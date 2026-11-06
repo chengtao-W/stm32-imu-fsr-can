@@ -86,7 +86,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance == TIM4) {
-		/* Schedule the 100 Hz CAN snapshot outside the timer ISR. */
+		/* Schedule the 200 Hz CAN snapshot outside the timer ISR. */
 		imu_tx_flag = 1;
 	}
 }
@@ -188,11 +188,11 @@ int main(void)
     if (imu_tx_flag) {
 		static uint8_t posture_tick_count = 0U;
         imu_tx_flag = 0;
-		if (++posture_tick_count >= 10U) {
+		if (++posture_tick_count >= 20U) {
 			posture_tick_count = 0U;
 			DetectPosture();
 		}
-		/* Publish sensor snapshots over CAN1 at 100 Hz. */
+		/* Publish sensor snapshots over CAN1 at 200 Hz. */
         ExoTelemetry_Push();
     }
     Robot_Flush_TxBuffer();
